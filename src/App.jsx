@@ -22,7 +22,7 @@ try {
   db = getFirestore(app);
   appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 } catch (error) {
-  console.warn("Ambiente Firebase não detetado nativamente. Modo de compatibilidade ativado.");
+  console.warn("Ambiente Firebase não detetado nativamente. A funcionar em Modo de Memória Local.");
 }
 
 // --- CONFIGURAÇÕES DE OPÇÕES E CORES ---
@@ -140,7 +140,7 @@ export default function App() {
   
   // Dados principais
   const [posts, setPosts] = useState([]);
-  const [leads, setLeads] = useState([]); // Leads manuais do Firebase
+  const [leads, setLeads] = useState([]); // Leads manuais
   const [csvLeads, setCsvLeads] = useState([]); // Leads vindos da Planilha
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
@@ -161,7 +161,7 @@ export default function App() {
   const [infoModal, setInfoModal] = useState(null);
   const [useAICorrection, setUseAICorrection] = useState(true);
 
-  // --- AUTENTICAÇÃO E FIREBASE (RULE 3) ---
+  // --- AUTENTICAÇÃO E FIREBASE ---
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => {
@@ -369,18 +369,26 @@ export default function App() {
     }
   }, [activeProfileId]);
 
-  // Ações de Perfil (Agora inclui os links de Posts e Leads)
+  // Ações de Perfil (Atualizado para funcionar com ou sem base de dados nativa)
   const handleCreateProfile = async (e) => {
     e.preventDefault();
-    if (!newProfileName.trim() || !user || !db) return;
+    if (!newProfileName.trim()) return;
     
     const newId = crypto.randomUUID();
-    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profiles', newId), {
+    const profileData = {
       name: newProfileName,
       postsCsvUrl: postsCsvUrl,
-      leadsCsvUrl: leadsCsvUrl, // Salva o link dos leads no Firebase!
+      leadsCsvUrl: leadsCsvUrl,
       createdAt: new Date().toISOString()
-    });
+    };
+
+    if (user && db) {
+      // Salva na nuvem (Firebase)
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profiles', newId), profileData);
+    } else {
+      // Salva localmente caso não haja ligação à base de dados (ex: Vercel)
+      setProfiles(prev => [...prev, { id: newId, ...profileData }]);
+    }
     
     setNewProfileName('');
     setPostsCsvUrl('');
@@ -391,8 +399,11 @@ export default function App() {
 
   const handleDeleteProfile = async (id, e) => {
     e.stopPropagation();
-    if(!user || !db) return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profiles', id));
+    if (user && db) {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profiles', id));
+    } else {
+      setProfiles(prev => prev.filter(p => p.id !== id));
+    }
     if(activeProfileId === id) setActiveProfileId(null);
   };
 
@@ -434,7 +445,7 @@ export default function App() {
               <h1 className="text-2xl font-bold text-slate-800">SkimMetrics DB</h1>
             </div>
             
-            <p className="text-sm text-slate-500 mb-6">Selecione um perfil existente para carregar os dados associados. Os dados ficam guardados no seu ambiente de nuvem.</p>
+            <p className="text-sm text-slate-500 mb-6">Selecione um perfil existente para carregar os dados associados. Os dados ficam guardados no seu ambiente atual.</p>
             
             <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
               {profiles.length === 0 ? (
@@ -493,7 +504,8 @@ export default function App() {
                 </div>
               </div>
 
-              <button type="submit" disabled={!user} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 px-4 rounded-lg transition-colors mt-2">
+              {/* Removido o disabled={!user} para permitir o uso pleno quando exportado! */}
+              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mt-2">
                 Guardar e Analisar
               </button>
             </form>
@@ -702,387 +714,4 @@ export default function App() {
               <h3 className="font-bold text-slate-800">Participação no Engajamento por Tipo</h3>
               <button onClick={() => setInfoModal(CHART_INFO.typePie)} className="text-slate-400 hover:text-blue-600 transition"><Info size={20} /></button>
             </div>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <span className="inline-flex items-center px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-md">
-                Engajamento Total: {totalEngagement.toLocaleString('pt-PT')}
-              </span>
-            </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={5} dataKey="value" label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                    {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
-            <div className="flex justify-between items-start mb-3">
-              <h3 className="font-bold text-slate-800">Volume de Votos em Enquetes</h3>
-              <button onClick={() => setInfoModal(CHART_INFO.poll)} className="text-slate-400 hover:text-blue-600 transition"><Info size={20} /></button>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <span className="inline-flex items-center px-2.5 py-1 bg-purple-50 border border-purple-100 text-purple-700 text-xs font-semibold rounded-md">
-                Total de Votos: {totalPollVotes.toLocaleString('pt-PT')}
-              </span>
-            </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={formattedMonthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                  <XAxis dataKey="displayMonth" axisLine={false} tickLine={false} />
-                  <YAxis axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{fill: '#f8fafc'}} />
-                  <Legend />
-                  <Bar dataKey="pollVotes" name="Votos em Enquetes" fill="#8b5cf6" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
-            <div className="flex justify-between items-start mb-3">
-              <h3 className="font-bold text-slate-800">Engajamento por Pilar Estratégico</h3>
-              <button onClick={() => setInfoModal(CHART_INFO.pillar)} className="text-slate-400 hover:text-blue-600 transition"><Info size={20} /></button>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <span className="inline-flex items-center px-2.5 py-1 bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs font-semibold rounded-md">
-                Engajamento Classificado: {totalPillarEngagement.toLocaleString('pt-PT')}
-              </span>
-            </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={pillarData} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#eee" />
-                  <XAxis type="number" axisLine={false} tickLine={false} />
-                  <YAxis dataKey="name" type="category" width={80} axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{fill: '#f8fafc'}} />
-                  <Bar dataKey="engagement" name="Engajamento" fill="#10b981" radius={[0,4,4,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
-            <div className="flex justify-between items-start mb-3">
-              <h3 className="font-bold text-slate-800">Engajamento por Tema Estratégico</h3>
-              <button onClick={() => setInfoModal(CHART_INFO.theme)} className="text-slate-400 hover:text-blue-600 transition"><Info size={20} /></button>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <span className="inline-flex items-center px-2.5 py-1 bg-rose-50 border border-rose-100 text-rose-700 text-xs font-semibold rounded-md">
-                Engajamento Classificado: {totalThemeEngagement.toLocaleString('pt-PT')}
-              </span>
-            </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={themeData} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#eee" />
-                  <XAxis type="number" axisLine={false} tickLine={false} />
-                  <YAxis dataKey="name" type="category" width={80} axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{fill: '#f8fafc'}} />
-                  <Bar dataKey="engagement" name="Engajamento" fill="#f43f5e" radius={[0,4,4,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderPosts = () => {
-    if(isSyncing) return <LoadingView />;
-
-    return (
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-0 overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/50">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-slate-800">Publicações e Análise Individual</h2>
-              <button onClick={() => setInfoModal(CHART_INFO.postsTable)} className="text-slate-400 hover:text-blue-600 transition" title="Entender os cálculos">
-                <Info size={20} />
-              </button>
-            </div>
-            <p className="text-sm text-slate-500 mt-1">Dados espelhados da sua planilha do Google Sheets.</p>
-          </div>
-          <div className="flex flex-wrap gap-3 items-center">
-            <button onClick={() => downloadCSVTemplate('posts')} className="flex items-center gap-2 px-4 py-2 border border-slate-200 bg-white text-slate-600 rounded-lg hover:bg-slate-50 transition shadow-sm text-sm font-medium" title="Baixar modelo de planilha CSV">
-              <Download size={16} /> Estrutura CSV
-            </button>
-            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer border border-slate-200 bg-white px-3 py-2 rounded-lg hover:bg-slate-50 transition select-none shadow-sm font-medium">
-              <input type="checkbox" checked={useAICorrection} onChange={(e) => setUseAICorrection(e.target.checked)} className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer" />
-              <Sparkles size={16} className={useAICorrection ? "text-amber-500" : "text-slate-400"} />
-            </label>
-            <button onClick={syncWithGoogleSheets} className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition shadow-sm text-sm font-medium">
-              <RefreshCw size={16} /> Atualizar Dados
-            </button>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50/80 text-slate-500 uppercase text-xs font-bold tracking-wider border-b border-slate-200">
-              <tr>
-                <th className="p-4 whitespace-nowrap">Mês</th>
-                <th className="p-4 w-1/3">Publicação</th>
-                <th className="p-4">Classificação</th>
-                <th className="p-4 text-right">Alcance</th>
-                <th className="p-4 text-right text-blue-600 bg-blue-50/30">Engajamento</th>
-                <th className="p-4 text-right text-purple-600 bg-purple-50/30">Taxa Eng.</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {posts.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="p-12 text-center text-slate-500">
-                    <FileText size={48} className="mx-auto text-slate-300 mb-3" />
-                    <p className="text-base font-medium text-slate-600">Nenhuma publicação encontrada.</p>
-                    <p className="text-sm mt-1">Sincronize uma planilha com dados válidos.</p>
-                  </td>
-                </tr>
-              ) : (
-                posts.sort((a,b) => b.month.localeCompare(a.month)).map(post => {
-                  const eng = calculateEngagement(post);
-                  const tax = post.reach > 0 ? ((eng / post.reach) * 100).toFixed(2) : 0;
-                  return (
-                    <tr key={post.id} className="hover:bg-slate-50/80 transition-colors group">
-                      <td className="p-4 whitespace-nowrap font-medium text-slate-600">
-                        {formatMonthYear(post.month)}
-                      </td>
-                      <td className="p-4 relative">
-                        <div className="line-clamp-2 cursor-help text-slate-700 font-medium group-hover:text-blue-700 transition-colors max-w-sm">
-                          {post.text || '-'}
-                        </div>
-                        <div className="opacity-0 invisible group-hover:opacity-100 group-hover:visible absolute z-50 left-4 top-full mt-1 w-80 bg-slate-800 text-white text-xs leading-relaxed p-4 rounded-xl shadow-2xl whitespace-normal break-words transition-all duration-200 border border-slate-700">
-                          <p className="font-bold text-slate-300 mb-2 uppercase tracking-wider text-[10px]">Texto Completo</p>
-                          {post.text}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-wrap gap-1.5">
-                          {post.type && <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-600 rounded text-xs font-semibold whitespace-nowrap">{post.type}</span>}
-                          {post.pillar && <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded text-xs font-semibold whitespace-nowrap">{post.pillar}</span>}
-                          {post.theme && <span className="px-2 py-0.5 bg-rose-50 border border-rose-100 text-rose-700 rounded text-xs font-semibold whitespace-nowrap">{post.theme}</span>}
-                        </div>
-                      </td>
-                      <td className="p-4 text-right text-slate-600 font-medium">
-                        {Number(post.reach).toLocaleString('pt-PT')}
-                      </td>
-                      <td className="p-4 text-right font-bold text-blue-700 bg-blue-50/30">
-                        {eng.toLocaleString('pt-PT')}
-                      </td>
-                      <td className="p-4 text-right font-bold text-purple-700 bg-purple-50/30">
-                        {tax}%
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-  const renderLeads = () => {
-    if(isSyncing) return <LoadingView />;
-
-    const handleSaveLead = async (e) => {
-      e.preventDefault();
-      if (!user || !db || !leadName.trim() || !leadDate) return;
-      const newId = crypto.randomUUID();
-      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'leads', newId), {
-        profileId: activeProfileId,
-        name: leadName,
-        date: leadDate,
-        createdAt: new Date().toISOString()
-      });
-      setLeadName('');
-      setLeadDate('');
-      setShowLeadForm(false);
-    };
-
-    const handleDeleteLead = async (id) => {
-      if (!user || !db) return;
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'leads', id));
-    };
-
-    return (
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <div>
-            <h2 className="text-xl font-bold text-slate-800">Leads Qualificados</h2>
-            <p className="text-sm text-slate-500 mt-1">Leads sincronizados da planilha e registos manuais.</p>
-          </div>
-          <div className="flex flex-wrap gap-3 items-center">
-             <button onClick={() => downloadCSVTemplate('leads')} className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition" title="Baixar modelo de planilha CSV para Leads">
-              <Download size={18} /> Estrutura CSV (Leads)
-            </button>
-            <button onClick={() => setShowLeadForm(!showLeadForm)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
-              <Plus size={18} /> Registar Lead Manual
-            </button>
-            <button onClick={syncWithGoogleSheets} className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition shadow-sm text-sm font-medium">
-              <RefreshCw size={16} /> Atualizar Sheets
-            </button>
-          </div>
-        </div>
-
-        {showLeadForm && (
-          <form onSubmit={handleSaveLead} className="bg-slate-50 p-6 rounded-lg border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1">Nome do Lead</label>
-              <input required type="text" placeholder="Ex: João Silva" className="w-full p-2 border border-slate-200 rounded focus:ring-2 focus:ring-blue-500 outline-none" value={leadName} onChange={(e) => setLeadName(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1">Data de Entrada no Funil</label>
-              <input required type="date" className="w-full p-2 border border-slate-200 rounded focus:ring-2 focus:ring-blue-500 outline-none" value={leadDate} onChange={(e) => setLeadDate(e.target.value)} />
-            </div>
-            <div className="md:col-span-2 flex justify-end gap-3 mt-2">
-              <button type="button" onClick={() => setShowLeadForm(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded transition">Cancelar</button>
-              <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition">Guardar Lead</button>
-            </div>
-          </form>
-        )}
-
-        <div className="overflow-x-auto mt-6">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200">
-              <tr>
-                <th className="p-3 rounded-tl-lg w-32">Data</th>
-                <th className="p-3">Nome do Lead</th>
-                <th className="p-3">Origem</th>
-                <th className="p-3 rounded-tr-lg w-20 text-center">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {allLeads.length === 0 ? (
-                <tr>
-                  <td colSpan="4" className="p-8 text-center text-slate-500">
-                    Nenhum lead encontrado. Adicione um manualmente ou sincronize a sua planilha!
-                  </td>
-                </tr>
-              ) : (
-                allLeads.sort((a,b) => b.normalizedDate.localeCompare(a.normalizedDate)).map(lead => {
-                  // Tenta formatar a data para ficar bonita (DD/MM/YYYY)
-                  const displayDate = lead.date && lead.date.includes('-') && lead.date.split('-').length === 3
-                    ? lead.date.split('-').reverse().join('/')
-                    : lead.date;
-                    
-                  return (
-                    <tr key={lead.id} className="hover:bg-slate-50 transition">
-                      <td className="p-3 font-medium text-slate-700">{displayDate}</td>
-                      <td className="p-3 font-medium">{lead.name}</td>
-                      <td className="p-3">
-                        {lead.source === 'manual' ? (
-                          <span className="text-xs text-blue-700 bg-blue-50 border border-blue-100 px-2 py-1 rounded">Registo Manual</span>
-                        ) : (
-                          <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded flex items-center gap-1 w-fit"><Database size={12}/> Sheets</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-center">
-                        {lead.source === 'manual' ? (
-                          <button onClick={() => handleDeleteLead(lead.id)} className="text-red-500 hover:text-red-700 p-1 transition" title="Apagar Lead">
-                            <Trash2 size={18} className="mx-auto" />
-                          </button>
-                        ) : (
-                          <span className="text-slate-300" title="Apagar na planilha do Google">-</span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
-      <aside className="w-full md:w-64 bg-white border-r border-slate-200 flex flex-col shrink-0">
-        <div className="p-6 border-b border-slate-100 flex flex-col gap-1">
-          <h1 className="font-bold text-xl text-blue-700 flex items-center gap-2">
-            <BarChart3 size={24} /> SkimMetrics
-          </h1>
-          <p className="text-xs text-slate-500 uppercase tracking-wider mt-2 font-semibold">Perfil Atual</p>
-          <div className="flex items-center gap-2 text-slate-800 font-medium bg-slate-50 p-2 rounded-lg border border-slate-100">
-            <UserCircle size={20} className="text-blue-500 shrink-0" />
-            <span className="truncate" title={activeProfile?.name}>{activeProfile?.name}</span>
-          </div>
-        </div>
-        
-        <nav className="flex-1 p-4 space-y-2">
-          <button onClick={() => setCurrentView('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'dashboard' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
-            <LayoutDashboard size={20} /> Dashboard Geral
-          </button>
-          <button onClick={() => setCurrentView('posts')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'posts' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
-            <FileText size={20} /> Publicações & Dados
-          </button>
-          <button onClick={() => setCurrentView('leads')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'leads' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
-            <Users size={20} /> Leads Qualificados
-          </button>
-        </nav>
-
-        <div className="p-4 border-t border-slate-200">
-          <button onClick={() => setActiveProfileId(null)} className="w-full flex items-center justify-center gap-2 px-4 py-2 text-slate-500 hover:text-slate-800 transition">
-            <ArrowLeft size={16} /> Voltar aos Perfis
-          </button>
-        </div>
-      </aside>
-
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto">
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800">
-              {currentView === 'dashboard' ? 'Visão Geral e Correlações' : 
-               currentView === 'posts' ? 'Gestão de Conteúdo' : 'Gestão de Leads e CRM'}
-            </h2>
-            <p className="text-slate-500">A analisar dados para: <span className="font-semibold">{activeProfile?.name}</span></p>
-          </div>
-        </header>
-
-        {currentView === 'dashboard' && renderDashboard()}
-        {currentView === 'posts' && renderPosts()}
-        {currentView === 'leads' && renderLeads()}
-      </main>
-
-      {infoModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 relative">
-            <button onClick={() => setInfoModal(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-full p-1 transition">
-              <X size={20} />
-            </button>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="bg-blue-100 text-blue-700 p-2 rounded-lg"><Info size={24} /></div>
-              <h3 className="text-xl font-bold text-slate-800 pr-8 leading-tight">{infoModal.title}</h3>
-            </div>
-            <div className="space-y-4 text-sm text-slate-600">
-              <div><h4 className="font-semibold text-slate-800 mb-1 flex items-center gap-2">Como é calculado</h4><p className="bg-slate-50 p-3 rounded-lg border border-slate-100">{infoModal.calc}</p></div>
-              <div><h4 className="font-semibold text-slate-800 mb-1">De onde vêm os dados</h4><p>{infoModal.origin}</p></div>
-              <div><h4 className="font-semibold text-slate-800 mb-1">Insight Estratégico</h4><p className="italic text-slate-500">"{infoModal.insight}"</p></div>
-            </div>
-            <div className="mt-6 flex justify-end border-t border-slate-100 pt-4">
-              <button onClick={() => setInfoModal(null)} className="px-5 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition">Entendi</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LoadingView() {
-  return (
-    <div className="flex flex-col items-center justify-center py-20">
-      <RefreshCw size={32} className="text-blue-500 animate-spin mb-4" />
-      <h3 className="text-lg font-semibold text-slate-700">A sincronizar os dados...</h3>
-      <p className="text-slate-500 text-sm mt-1">Lendo as publicações e leads (Google Sheets e Nativos).</p>
-    </div>
-  );
-}
+            <div
